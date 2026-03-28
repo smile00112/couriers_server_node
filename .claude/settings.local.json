@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(powershell.exe -File \".specify/scripts/powershell/update-agent-context.ps1\" -AgentType claude)",
+      "Bash(powershell.exe -File \".specify/scripts/powershell/check-prerequisites.ps1\" -Json)",
+      "Bash(pnpm install:*)",
+      "Bash(npm --version)",
+      "Bash(npm install:*)",
+      "Read(//c/Users/Smile/AppData/Local/**)",
+      "Read(//c/Users/Smile/scoop/**)",
+      "Bash(corepack enable:*)",
+      "Bash(pnpm --version)",
+      "Bash(pnpm build:*)",
+      "Bash(pnpm add:*)"
+    ]
+  }
+}

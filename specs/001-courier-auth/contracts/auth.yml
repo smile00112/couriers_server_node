@@ -1,0 +1,281 @@
+openapi: "3.1.0"
+info:
+  title: Courier Authentication API
+  version: "1.0.0"
+  description: >
+    Authentication endpoints for the Courier App.
+    All endpoints are under /api/v1/auth/courier/.
+    Unauthenticated endpoints (send-code, verify-code, login) require owner_id in the request body.
+    The logout endpoint requires a valid Bearer access token.
+
+servers:
+  - url: /api/v1
+
+tags:
+  - name: courier-auth
+    description: Courier authentication — code-based and password-based
+
+paths:
+
+  /auth/courier/send-code:
+    post:
+      tags: [courier-auth]
+      summary: Request a one-time authentication code
+      description: >
+        Validates the phone number, confirms the courier exists in the given tenant,
+        and dispatches a 6-digit code via the selected channel (SMS or Telegram).
+        If a valid unexpired code already exists for this phone + tenant, no new code is created
+        and the response still returns 202 (idempotent).
+        Rate-limited to 5 requests per phone per tenant per 10-minute window.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendCodeRequest'
+      responses:
+        '202':
+          description: Code dispatched (or existing active code retained). No body.
+        '400':
+          description: Invalid phone format or empty request fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '404':
+          description: No courier account found for this phone in the given tenant.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Rate limit exceeded (5 requests per phone per tenant per 10 minutes).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/courier/verify-code:
+    post:
+      tags: [courier-auth]
+      summary: Verify a one-time code and obtain credentials
+      description: >
+        Validates the submitted code against the active record for the given phone + tenant.
+        On success, marks the code as consumed, issues a JWT access token (15-minute TTL)
+        and an opaque refresh token (30-day TTL).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyCodeRequest'
+      responses:
+        '200':
+          description: Authentication successful.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTokensResponse'
+        '400':
+          description: Invalid or missing fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '401':
+          description: Code is invalid, expired, or already used.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/courier/login:
+    post:
+      tags: [courier-auth]
+      summary: Authenticate with username and password
+      description: >
+        Alternative authentication path for couriers with a username/password credential.
+        Rate-limited to 5 failed attempts per identity per tenant per 10-minute window.
+        Does not reveal whether the failure is due to wrong username or wrong password.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginPasswordRequest'
+      responses:
+        '200':
+          description: Authentication successful.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthTokensResponse'
+        '400':
+          description: Invalid or missing fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '401':
+          description: Invalid credentials.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Too many failed login attempts. Try again after the rate-limit window resets.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/courier/logout:
+    post:
+      tags: [courier-auth]
+      summary: Invalidate the current session
+      description: >
+        Revokes the refresh token associated with the current session.
+        Requires a valid Bearer access token.
+        After logout, the access token remains technically valid until its 15-minute TTL expires,
+        but the refresh token is immediately invalidated so no new access tokens can be obtained.
+        The caller MUST discard both tokens after this call.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LogoutRequest'
+      responses:
+        '204':
+          description: Session invalidated. No body.
+        '401':
+          description: Missing or invalid Bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+components:
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT access token issued by verify-code or login endpoints.
+
+  schemas:
+
+    SendCodeRequest:
+      type: object
+      required: [owner_id, phone]
+      properties:
+        owner_id:
+          type: string
+          format: uuid
+          description: Tenant identifier. Determines which courier roster to search.
+          example: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+        phone:
+          type: string
+          description: Courier phone number. Any valid national or international format is accepted; normalized to E.164 internally.
+          example: "+79001234567"
+        channel:
+          type: string
+          enum: [sms, telegram]
+          default: sms
+          description: Delivery channel for the one-time code.
+
+    VerifyCodeRequest:
+      type: object
+      required: [owner_id, phone, code]
+      properties:
+        owner_id:
+          type: string
+          format: uuid
+          example: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+        phone:
+          type: string
+          example: "+79001234567"
+        code:
+          type: string
+          minLength: 6
+          maxLength: 6
+          pattern: "^[0-9]{6}$"
+          description: The 6-digit code delivered to the courier.
+          example: "482917"
+
+    LoginPasswordRequest:
+      type: object
+      required: [owner_id, login, password]
+      properties:
+        owner_id:
+          type: string
+          format: uuid
+          example: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+        login:
+          type: string
+          description: Courier username assigned by the administrator.
+          example: "courier_ali"
+        password:
+          type: string
+          format: password
+          example: "s3cur3P@ssw0rd"
+
+    LogoutRequest:
+      type: object
+      required: [refresh_token]
+      properties:
+        refresh_token:
+          type: string
+          description: The opaque refresh token to revoke.
+          example: "d1e8a700b7f148e9bc..."
+
+    AuthTokensResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+          description: Signed JWT. TTL 15 minutes. Include as Bearer token on all protected requests.
+          example: "eyJhbGciOiJSUzI1NiIsInR5..."
+        refresh_token:
+          type: string
+          description: Opaque token. TTL 30 days. Use to obtain a new access token when the current one expires.
+          example: "d1e8a700b7f148e9bc..."
+        token_type:
+          type: string
+          enum: [Bearer]
+          example: "Bearer"
+        expires_in:
+          type: integer
+          description: Access token lifetime in seconds.
+          example: 900
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 404
+            message:
+              type: string
+              example: "Courier not found in this tenant"
+
+    ValidationError:
+      type: object
+      properties:
+        message:
+          type: array
+          items:
+            type: string
+          example: ["phone must be a valid phone number", "owner_id must be a UUID"]
+        error:
+          type: string
+          example: "Bad Request"
+        statusCode:
+          type: integer
+          example: 400
