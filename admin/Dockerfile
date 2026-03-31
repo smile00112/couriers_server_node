@@ -12,7 +12,7 @@ COPY . .
 ARG VITE_API_URL=https://new-cur.foodloveapp.ru/v1
 ENV VITE_API_URL=$VITE_API_URL
 
-RUN npm run build
+RUN npx vite build
 
 # Stage 2: Serve static files via nginx
 FROM nginx:alpine
