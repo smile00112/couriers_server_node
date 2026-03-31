@@ -53,7 +53,7 @@ services:
       context: ./admin
       dockerfile: Dockerfile
       args:
-        VITE_API_URL: https://new-cur.foodloveapp.ru/v1
+        VITE_API_URL: https://new-cur.foodloveapp.ru
     restart: unless-stopped
     # No ports: admin only reachable via nginx internal network
 
