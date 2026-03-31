@@ -10,3 +10,8 @@ coverage/
 .env.*
 !.env.example
 tmp/
+
+# Admin panel
+admin/.env.local
+admin/node_modules/
+admin/dist/

@@ -5,7 +5,7 @@ export interface JwtPayload {
 }
 
 export interface AuthUser {
-  courierId: string;
+  userId: string;
   ownerId: string;
   role: string;
 }

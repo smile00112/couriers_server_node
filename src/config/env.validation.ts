@@ -1,10 +1,5 @@
 import { plainToInstance } from 'class-transformer';
-import {
-  IsNumber,
-  IsOptional,
-  IsString,
-  validateSync,
-} from 'class-validator';
+import { IsNumber, IsOptional, IsString, validateSync } from 'class-validator';
 
 class EnvironmentVariables {
   @IsString() DB_HOST!: string;
@@ -31,13 +26,19 @@ class EnvironmentVariables {
   @IsOptional() @IsString() AUTH_CODE_FIXED?: string;
   @IsOptional() @IsString() AUTH_CHANNEL_DEFAULT: string = 'sms';
   @IsOptional() @IsString() TELEGRAM_BOT_TOKEN?: string;
+
+  // Firebase / FCM
+  @IsOptional() @IsString() FIREBASE_SERVICE_ACCOUNT_JSON?: string;
+  @IsOptional() @IsString() FCM_DISABLED: string = 'false';
 }
 
 export function validate(config: Record<string, unknown>) {
   const validatedConfig = plainToInstance(EnvironmentVariables, config, {
     enableImplicitConversion: true,
   });
-  const errors = validateSync(validatedConfig, { skipMissingProperties: false });
+  const errors = validateSync(validatedConfig, {
+    skipMissingProperties: false,
+  });
   if (errors.length > 0) throw new Error(errors.toString());
   return validatedConfig;
 }

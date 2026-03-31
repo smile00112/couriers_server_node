@@ -1,95 +1,104 @@
-# Implementation Plan: Courier Authentication
+# Implementation Plan: [FEATURE]
 
-**Branch**: `001-courier-auth` | **Date**: 2026-03-28 | **Spec**: [spec.md](./spec.md)
-**Input**: Feature specification from `/specs/001-courier-auth/spec.md`
+**Branch**: `[###-feature-name]` | **Date**: [DATE] | **Spec**: [link]
+**Input**: Feature specification from `/specs/[###-feature-name]/spec.md`
+
+**Note**: This template is filled in by the `/speckit.plan` command. See `.specify/templates/plan-template.md` for the execution workflow.
 
 ## Summary
 
-Courier authentication enables couriers to identify themselves and obtain session credentials via three paths: SMS one-time code, Telegram one-time code, or username/password. The feature produces a short-lived access JWT and a longer-lived refresh token. It is the gateway to all other courier-facing API endpoints.
-
-The implementation introduces a `courier_auth_codes` table (replaces the legacy `auth_sms` table), a `courier_refresh_tokens` table for logout support, and a NestJS `AuthModule` with JWT strategy, rate limiting, and tenant-scoped phone lookup. SMS and Telegram delivery are dispatched via BullMQ to keep auth endpoints fast.
+[Extract from feature spec: primary requirement + technical approach from research]
 
 ## Technical Context
 
-**Language/Version**: Node.js 20 LTS, TypeScript 5.x
-**Primary Dependencies**: NestJS 10, TypeORM 0.3, @nestjs/jwt, @nestjs/passport, passport-jwt, bcrypt, @nestjs/throttler (Redis store), BullMQ, class-validator/class-transformer
-**Storage**: PostgreSQL — `courier_auth_codes`, `courier_refresh_tokens`; extend `couriers` with `login` / `password_hash`
-**Testing**: Jest + supertest (NestJS default); integration tests hit a real PostgreSQL + Redis test instance
-**Target Platform**: Docker container on Linux (Kubernetes cluster)
-**Project Type**: web-service (NestJS REST API, `/api/v1/` prefix)
-**Performance Goals**: Auth endpoints respond under 500ms p95; code delivery dispatched async (BullMQ)
-**Constraints**: Multi-tenant isolation — `owner_id` required on every auth operation; stateless JWT access tokens (15 min TTL); refresh tokens stored in DB for revocation
-**Scale/Scope**: SaaS multi-tenant; each tenant is an independent Owner; phone numbers unique per tenant
+<!--
+  ACTION REQUIRED: Replace the content in this section with the technical details
+  for the project. The structure here is presented in advisory capacity to guide
+  the iteration process.
+-->
+
+**Language/Version**: [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION]  
+**Primary Dependencies**: [e.g., FastAPI, UIKit, LLVM or NEEDS CLARIFICATION]  
+**Storage**: [if applicable, e.g., PostgreSQL, CoreData, files or N/A]  
+**Testing**: [e.g., pytest, XCTest, cargo test or NEEDS CLARIFICATION]  
+**Target Platform**: [e.g., Linux server, iOS 15+, WASM or NEEDS CLARIFICATION]
+**Project Type**: [e.g., library/cli/web-service/mobile-app/compiler/desktop-app or NEEDS CLARIFICATION]  
+**Performance Goals**: [domain-specific, e.g., 1000 req/s, 10k lines/sec, 60 fps or NEEDS CLARIFICATION]  
+**Constraints**: [domain-specific, e.g., <200ms p95, <100MB memory, offline-capable or NEEDS CLARIFICATION]  
+**Scale/Scope**: [domain-specific, e.g., 10k users, 1M LOC, 50 screens or NEEDS CLARIFICATION]
 
 ## Constitution Check
 
-*GATE: Must pass before Phase 0 research. Re-checked after Phase 1 design.*
+*GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-| Principle | Status | Notes |
-|-----------|--------|-------|
-| I. Order Lifecycle Integrity | ✅ N/A | Auth does not touch order state |
-| II. Real-Time as First-Class Concern | ✅ N/A | Auth events (login/logout) are not broadcast; no operator visibility required |
-| III. API Contract Stability | ✅ Pass | All endpoints under `/api/v1/auth/courier/`; versioned from day one |
-| IV. Role-Based Authorization | ✅ Pass | JWT carries `role: courier` + `owner_id` claims; guard applied to logout endpoint; no courier endpoint is unguarded |
-| V. Background Jobs Idempotent | ✅ Pass | SMS/Telegram delivery jobs are idempotent — re-delivering the same code is safe (courier ignores duplicate SMS); job keyed on `auth_code.id` |
-| VI. Multi-Tenant Isolation | ✅ Pass | `owner_id` is a required field on send-code; all `courier_auth_codes` and `courier_refresh_tokens` records carry `owner_id`; phone lookup is always scoped to a single tenant |
-| VII. Simplicity | ✅ Pass | No plugin points or generic auth framework — only what the spec requires |
-| VIII. Admin Panel UX | ✅ N/A | Courier auth has no admin panel entity |
-
-**Complexity Tracking**: No violations. No speculative abstractions introduced.
+[Gates determined based on constitution file]
 
 ## Project Structure
 
 ### Documentation (this feature)
 
 ```text
-specs/001-courier-auth/
-├── plan.md              ← this file
-├── research.md          ← Phase 0 output
-├── data-model.md        ← Phase 1 output
-├── quickstart.md        ← Phase 1 output
-├── contracts/
-│   └── auth.yml         ← Phase 1 output (OpenAPI fragment)
-└── tasks.md             ← Phase 2 output (/speckit.tasks — NOT created here)
+specs/[###-feature]/
+├── plan.md              # This file (/speckit.plan command output)
+├── research.md          # Phase 0 output (/speckit.plan command)
+├── data-model.md        # Phase 1 output (/speckit.plan command)
+├── quickstart.md        # Phase 1 output (/speckit.plan command)
+├── contracts/           # Phase 1 output (/speckit.plan command)
+└── tasks.md             # Phase 2 output (/speckit.tasks command - NOT created by /speckit.plan)
 ```
 
 ### Source Code (repository root)
+<!--
+  ACTION REQUIRED: Replace the placeholder tree below with the concrete layout
+  for this feature. Delete unused options and expand the chosen structure with
+  real paths (e.g., apps/admin, packages/something). The delivered plan must
+  not include Option labels.
+-->
 
 ```text
+# [REMOVE IF UNUSED] Option 1: Single project (DEFAULT)
 src/
-├── auth/
-│   ├── auth.module.ts
-│   ├── courier-auth.controller.ts       ← send-code, verify-code, login, logout endpoints
-│   ├── courier-auth.service.ts          ← orchestration, rate-limit checks, token issuance
-│   ├── code-delivery/
-│   │   ├── code-delivery.processor.ts   ← BullMQ job processor (SMS / Telegram dispatch)
-│   │   └── code-delivery.service.ts     ← enqueues delivery job; abstracts channel selection
-│   ├── strategies/
-│   │   └── jwt.strategy.ts              ← passport-jwt strategy; validates access token
-│   ├── guards/
-│   │   └── courier-jwt.guard.ts         ← applied to all protected courier endpoints
-│   ├── dto/
-│   │   ├── send-code.dto.ts
-│   │   ├── verify-code.dto.ts
-│   │   └── login-password.dto.ts
-│   └── entities/
-│       ├── auth-code.entity.ts          ← courier_auth_codes table
-│       └── courier-refresh-token.entity.ts  ← courier_refresh_tokens table
-├── couriers/
-│   └── entities/
-│       └── courier.entity.ts            ← add login, password_hash columns
-├── common/
-│   ├── decorators/
-│   │   └── current-courier.decorator.ts
-│   └── pipes/
-│       └── phone-normalize.pipe.ts
-└── main.ts
+├── models/
+├── services/
+├── cli/
+└── lib/
 
-database/
-└── migrations/
-    ├── 001_create_courier_auth_codes.ts
-    ├── 002_create_courier_refresh_tokens.ts
-    └── 003_add_courier_credentials.ts    ← login + password_hash on couriers
+tests/
+├── contract/
+├── integration/
+└── unit/
+
+# [REMOVE IF UNUSED] Option 2: Web application (when "frontend" + "backend" detected)
+backend/
+├── src/
+│   ├── models/
+│   ├── services/
+│   └── api/
+└── tests/
+
+frontend/
+├── src/
+│   ├── components/
+│   ├── pages/
+│   └── services/
+└── tests/
+
+# [REMOVE IF UNUSED] Option 3: Mobile + API (when "iOS/Android" detected)
+api/
+└── [same as backend above]
+
+ios/ or android/
+└── [platform-specific structure: feature modules, UI flows, platform tests]
 ```
 
-**Structure Decision**: Single NestJS project with feature modules. Auth lives in `src/auth/`. Code delivery is a sub-module inside auth (not a separate top-level module) since it has no other consumers yet — follows Principle VII (no premature extraction).
+**Structure Decision**: [Document the selected structure and reference the real
+directories captured above]
+
+## Complexity Tracking
+
+> **Fill ONLY if Constitution Check has violations that must be justified**
+
+| Violation | Why Needed | Simpler Alternative Rejected Because |
+|-----------|------------|-------------------------------------|
+| [e.g., 4th project] | [current need] | [why 3 projects insufficient] |
+| [e.g., Repository pattern] | [specific problem] | [why direct DB access insufficient] |

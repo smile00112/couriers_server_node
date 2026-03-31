@@ -9,6 +9,10 @@ import { validate } from './config/env.validation';
 import { AuthModule } from './auth/auth.module';
 import { OwnersModule } from './owners/owners.module';
 import { CouriersModule } from './couriers/couriers.module';
+import { FirebaseModule } from './firebase/firebase.module';
+import { OrdersModule } from './orders/orders.module';
+import { PayoutsModule } from './payouts/payouts.module';
+import { UsersModule } from './users/users.module';
 
 @Module({
   imports: [
@@ -42,14 +46,26 @@ import { CouriersModule } from './couriers/couriers.module';
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
         throttlers: [
-          { name: 'code', ttl: (config.get<number>('THROTTLE_CODE_TTL') as number) * 1000, limit: config.get<number>('THROTTLE_CODE_LIMIT') as number },
-          { name: 'login', ttl: (config.get<number>('THROTTLE_LOGIN_TTL') as number) * 1000, limit: config.get<number>('THROTTLE_LOGIN_LIMIT') as number },
+          {
+            name: 'code',
+            ttl: (config.get<number>('THROTTLE_CODE_TTL') as number) * 1000,
+            limit: config.get<number>('THROTTLE_CODE_LIMIT') as number,
+          },
+          {
+            name: 'login',
+            ttl: (config.get<number>('THROTTLE_LOGIN_TTL') as number) * 1000,
+            limit: config.get<number>('THROTTLE_LOGIN_LIMIT') as number,
+          },
         ],
       }),
     }),
     AuthModule,
     OwnersModule,
     CouriersModule,
+    FirebaseModule,
+    OrdersModule,
+    PayoutsModule,
+    UsersModule,
   ],
   controllers: [AppController],
   providers: [AppService],

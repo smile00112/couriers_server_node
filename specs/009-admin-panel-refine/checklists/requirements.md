@@ -1,7 +1,7 @@
-# Specification Quality Checklist: Work Shift Management
+# Specification Quality Checklist: Admin Panel
 
 **Purpose**: Validate specification completeness and quality before proceeding to planning
-**Created**: 2026-03-28
+**Created**: 2026-03-30
 **Feature**: [spec.md](../spec.md)
 
 ## Content Quality

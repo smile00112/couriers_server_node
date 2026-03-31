@@ -12,6 +12,10 @@ export class Owner {
   @Column() name!: string;
   @Column({ unique: true }) email!: string;
   @Column({ nullable: true }) timezone!: string;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  default_delivery_fee!: number;
+
   @CreateDateColumn() created_at!: Date;
   @UpdateDateColumn() updated_at!: Date;
 }

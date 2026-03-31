@@ -1,0 +1,474 @@
+openapi: "3.1.0"
+info:
+  title: Order Ingestion API
+  version: "1.0.0"
+  description: >
+    Endpoints for creating and listing orders.
+    All endpoints are under /api/v1/orders.
+    Requires a valid Bearer JWT. The tenant context (owner_id) is derived from
+    the JWT and MUST NOT be provided in the request body.
+    Permitted roles for order creation: Owner, Manager, Order Operator.
+    Courier role is forbidden (403).
+
+servers:
+  - url: /api/v1
+
+tags:
+  - name: orders
+    description: Order ingestion — create and list orders
+
+paths:
+
+  /orders:
+    post:
+      tags: [orders]
+      summary: Create a new order
+      description: >
+        Creates an order atomically: resolves or creates the client by phone,
+        creates the order record and all line items, writes an audit entry,
+        emits a real-time Socket.IO event to all staff in the tenant, and
+        enqueues a BullMQ job to push FCM notifications to available couriers.
+        The delivery fee is assigned automatically from the tenant's configured
+        default delivery fee; it cannot be overridden by the caller.
+        Order numbers must be unique within the tenant.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequest'
+      responses:
+        '201':
+          description: Order created successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
+        '400':
+          description: Validation error — missing or invalid fields.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '401':
+          description: Missing or invalid Bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Insufficient role. Courier role cannot create orders.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: >
+            Duplicate order number — an order with this number already exists
+            in the tenant.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DuplicateOrderError'
+
+    get:
+      tags: [orders]
+      summary: List orders for the current tenant
+      description: >
+        Returns a paginated list of orders belonging to the authenticated user's
+        tenant. Results are ordered by creation date descending.
+        Permitted roles: Owner, Manager, Order Operator.
+        Courier role is forbidden.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [created, assigned, picked_up, in_delivery, completed, cancelled]
+          description: Filter orders by status.
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Paginated order list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderListResponse'
+        '401':
+          description: Missing or invalid Bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Insufficient role.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /orders/{id}:
+    get:
+      tags: [orders]
+      summary: Get a single order by ID
+      description: >
+        Returns the full order record including items and audit entries.
+        Scoped to the authenticated user's tenant.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Order found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderDetailResponse'
+        '401':
+          description: Missing or invalid Bearer token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Insufficient role.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Order not found in this tenant.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+components:
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT access token. Claims include sub (userId), owner_id, role.
+
+  schemas:
+
+    CreateOrderRequest:
+      type: object
+      required:
+        - order_number
+        - client_phone
+        - pickup_address
+        - pickup_lat
+        - pickup_lng
+        - dropoff_address
+        - dropoff_lat
+        - dropoff_lng
+        - items
+      properties:
+        order_number:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: >
+            Unique identifier for this order within the tenant.
+            Any non-empty string is valid; format is not enforced by the system.
+          example: "ORD-2026-00042"
+        client_phone:
+          type: string
+          description: Client phone number in any national or international format. Normalized to E.164 internally.
+          example: "+79001234567"
+        pickup_address:
+          type: string
+          minLength: 1
+          description: Human-readable pickup address.
+          example: "ул. Ленина, 10, Москва"
+        pickup_lat:
+          type: number
+          format: double
+          minimum: -90
+          maximum: 90
+          example: 55.7558
+        pickup_lng:
+          type: number
+          format: double
+          minimum: -180
+          maximum: 180
+          example: 37.6173
+        dropoff_address:
+          type: string
+          minLength: 1
+          description: Human-readable dropoff address.
+          example: "пр. Мира, 45, Москва"
+        dropoff_lat:
+          type: number
+          format: double
+          minimum: -90
+          maximum: 90
+          example: 55.7890
+        dropoff_lng:
+          type: number
+          format: double
+          minimum: -180
+          maximum: 180
+          example: 37.6400
+        callback_url:
+          type: string
+          format: uri
+          nullable: true
+          description: >
+            Optional URL for external systems to receive lifecycle event callbacks.
+            Stored without reachability validation.
+          example: "https://partner-platform.example.com/webhooks/orders/42"
+        items:
+          type: array
+          minItems: 1
+          description: At least one item is required.
+          items:
+            $ref: '#/components/schemas/OrderItemInput'
+
+    OrderItemInput:
+      type: object
+      required: [name, quantity, price]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+          example: "Пицца Маргарита"
+        quantity:
+          type: integer
+          minimum: 1
+          example: 2
+        price:
+          type: number
+          format: double
+          minimum: 0
+          example: 850.00
+
+    OrderResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+        owner_id:
+          type: string
+          format: uuid
+        order_number:
+          type: string
+          example: "ORD-2026-00042"
+        status:
+          type: string
+          example: "created"
+        client:
+          $ref: '#/components/schemas/ClientSummary'
+        pickup_address:
+          type: string
+        pickup_lat:
+          type: number
+        pickup_lng:
+          type: number
+        dropoff_address:
+          type: string
+        dropoff_lat:
+          type: number
+        dropoff_lng:
+          type: number
+        delivery_fee:
+          type: number
+          format: double
+          description: Courier award, assigned from tenant config at creation time.
+          example: 350.00
+        callback_url:
+          type: string
+          nullable: true
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItemResponse'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    OrderDetailResponse:
+      allOf:
+        - $ref: '#/components/schemas/OrderResponse'
+        - type: object
+          properties:
+            audit_entries:
+              type: array
+              items:
+                $ref: '#/components/schemas/AuditEntryResponse'
+
+    OrderListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderResponse'
+        meta:
+          type: object
+          properties:
+            total:
+              type: integer
+              example: 142
+            page:
+              type: integer
+              example: 1
+            limit:
+              type: integer
+              example: 20
+            total_pages:
+              type: integer
+              example: 8
+
+    OrderItemResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        quantity:
+          type: integer
+        price:
+          type: number
+          format: double
+
+    ClientSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        phone:
+          type: string
+          example: "+79001234567"
+        name:
+          type: string
+          nullable: true
+
+    AuditEntryResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        action:
+          type: string
+          example: "created"
+        actor_id:
+          type: string
+          format: uuid
+        actor_role:
+          type: string
+          example: "operator"
+        created_at:
+          type: string
+          format: date-time
+
+    DuplicateOrderError:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 409
+            message:
+              type: string
+              example: "An order with number 'ORD-2026-00042' already exists in this tenant"
+            existing_order_id:
+              type: string
+              format: uuid
+              description: ID of the existing order with this number.
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 404
+            message:
+              type: string
+              example: "Order not found"
+
+    ValidationError:
+      type: object
+      properties:
+        message:
+          type: array
+          items:
+            type: string
+          example:
+            - "items must contain at least 1 elements"
+            - "pickup_lat must be a number conforming to the specified constraints"
+        error:
+          type: string
+          example: "Bad Request"
+        statusCode:
+          type: integer
+          example: 400
+
+# Socket.IO Events (informational — not part of REST contract)
+#
+# Event: order:created
+# Room:  tenant:{ownerId}:staff
+# Direction: server → client
+# Payload:
+#   {
+#     "event": "order:created",
+#     "data": {
+#       "id": "<uuid>",
+#       "order_number": "ORD-2026-00042",
+#       "status": "created",
+#       "pickup_address": "...",
+#       "dropoff_address": "...",
+#       "delivery_fee": 350.00,
+#       "client_phone": "+79001234567",
+#       "created_at": "2026-03-29T10:00:00.000Z"
+#     }
+#   }
+#
+# Event: order:new_available
+# Room:  tenant:{ownerId}:couriers
+# Direction: server → client
+# Payload: same as order:created payload
+# Note: emitted from the new-order-notify BullMQ processor via Socket.IO

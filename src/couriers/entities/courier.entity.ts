@@ -30,10 +30,22 @@ export class Courier {
 
   @Column({ length: 30 }) phone!: string;
 
-  @Column({ type: 'enum', enum: CourierStatus, default: CourierStatus.UNAVAILABLE })
+  @Column({
+    type: 'enum',
+    enum: CourierStatus,
+    default: CourierStatus.UNAVAILABLE,
+  })
   status!: CourierStatus;
 
   @Column({ nullable: true }) fcm_token!: string;
+
+  @Column({ nullable: true }) telegram_chat_id!: string | null;
+
+  @Column({ length: 100, nullable: true }) login!: string | null;
+
+  @Column({ length: 255, nullable: true, select: false }) password_hash!:
+    | string
+    | null;
 
   @CreateDateColumn() created_at!: Date;
 

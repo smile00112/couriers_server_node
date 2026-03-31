@@ -1,0 +1,399 @@
+openapi: 3.1.0
+info:
+  title: Work Shift Management API
+  version: 1.0.0
+  description: |
+    Endpoints for couriers to open/close shifts and for staff to view shift history and live active shifts.
+    All endpoints are under `/api/v1/` and require a Bearer JWT.
+
+    ## Shift Flow
+    ```
+    Courier App → POST /couriers/shift/open
+      → courier_shifts INSERT (status='open', started_at=NOW())
+      → couriers.status = 'available' (atomic)
+      → Socket.IO: courier:shift_opened → staff room
+
+    Courier App → POST /couriers/shift/close
+      → courier_shifts UPDATE SET status='closed', ended_at=NOW()
+      → couriers.status = 'unavailable' (atomic)
+      → Socket.IO: courier:shift_closed → staff room
+
+    Order Claim (any path) → shift gate check
+      → if no open shift → 422 Unprocessable Entity
+    ```
+
+servers:
+  - url: /api/v1
+
+tags:
+  - name: shift-management
+    description: Courier shift lifecycle and history
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+
+    ShiftResponseDto:
+      type: object
+      description: A single shift record
+      required: [id, courier_id, status, started_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        courier_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [open, closed]
+          example: open
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Null while shift is open
+        duration_minutes:
+          type: number
+          format: double
+          nullable: true
+          example: 480.5
+          description: Duration in minutes. Null while shift is open.
+        order_count:
+          type: integer
+          nullable: true
+          example: 12
+          description: Number of orders completed during this shift. Null while shift is open or omitted for list brevity.
+
+    PaginatedShiftsDto:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ShiftResponseDto'
+        meta:
+          type: object
+          required: [total, page, limit, total_pages]
+          properties:
+            total:
+              type: integer
+              example: 45
+            page:
+              type: integer
+              example: 1
+            limit:
+              type: integer
+              example: 20
+            total_pages:
+              type: integer
+              example: 3
+
+    ActiveShiftItemDto:
+      type: object
+      description: One entry in the active shifts list (staff view)
+      required: [id, courier_id, courier_name, started_at, elapsed_minutes, active_order_count]
+      properties:
+        id:
+          type: string
+          format: uuid
+        courier_id:
+          type: string
+          format: uuid
+        courier_name:
+          type: string
+          example: Ivan Petrov
+        started_at:
+          type: string
+          format: date-time
+        elapsed_minutes:
+          type: number
+          format: double
+          example: 127.3
+        active_order_count:
+          type: integer
+          example: 1
+          description: Number of orders currently in non-terminal status assigned to this courier
+
+    ActiveShiftsResponseDto:
+      type: object
+      required: [data, total]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ActiveShiftItemDto'
+        total:
+          type: integer
+          example: 14
+
+    ErrorDto:
+      type: object
+      required: [statusCode, message]
+      properties:
+        statusCode:
+          type: integer
+        message:
+          type: string
+        error:
+          type: string
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid JWT
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDto'
+    Forbidden:
+      description: Role not permitted for this action
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDto'
+    NotFound:
+      description: Resource not found or not in tenant
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDto'
+    Conflict:
+      description: Shift state conflict (e.g., already open, or no shift to close)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDto'
+          example:
+            statusCode: 409
+            message: "Courier already has an open shift"
+            error: "Conflict"
+    UnprocessableEntity:
+      description: Courier has no open shift — order assignment blocked
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDto'
+          example:
+            statusCode: 422
+            message: "Courier does not have an open shift"
+            error: "Unprocessable Entity"
+
+security:
+  - bearerAuth: []
+
+paths:
+
+  /couriers/shift/open:
+    post:
+      summary: Open a new shift
+      operationId: openShift
+      tags: [shift-management]
+      description: |
+        Courier opens a new work shift. Records start time and updates courier availability to "available".
+        Rejects if the courier already has an open shift.
+        Emits `courier:shift_opened` to the staff Socket.IO room.
+
+        Requires role: **Courier**.
+      responses:
+        '201':
+          description: Shift opened successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShiftResponseDto'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /couriers/shift/close:
+    post:
+      summary: Close the current open shift
+      operationId: closeShift
+      tags: [shift-management]
+      description: |
+        Courier closes their current open shift. Records end time and updates courier availability to "unavailable".
+        Rejects if the courier has no open shift.
+        Emits `courier:shift_closed` to the staff Socket.IO room.
+
+        Requires role: **Courier**.
+      responses:
+        '200':
+          description: Shift closed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShiftResponseDto'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /couriers/shift/current:
+    get:
+      summary: Get the courier's current open shift
+      operationId: getCurrentShift
+      tags: [shift-management]
+      description: |
+        Returns the courier's currently open shift, or null if no shift is open.
+
+        Requires role: **Courier**.
+      responses:
+        '200':
+          description: Current shift (null body if no open shift)
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ShiftResponseDto'
+                  - type: 'null'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /couriers/shift/history:
+    get:
+      summary: Get the courier's own shift history
+      operationId: getOwnShiftHistory
+      tags: [shift-management]
+      description: |
+        Returns the authenticated courier's past and current shifts, newest first.
+        Includes duration and order count per closed shift.
+
+        Requires role: **Courier**.
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+          description: Filter shifts starting on or after this UTC timestamp
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+          description: Filter shifts starting before or on this UTC timestamp
+      responses:
+        '200':
+          description: Paginated shift history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedShiftsDto'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /couriers/active-shifts:
+    get:
+      summary: List all currently open shifts in the tenant
+      operationId: getActiveShifts
+      tags: [shift-management]
+      description: |
+        Returns all couriers with an open shift in the requesting staff member's tenant.
+        Includes courier name, start time, elapsed time, and current active order count.
+
+        Requires role: **Owner**, **Manager**, or **Order Operator**.
+      responses:
+        '200':
+          description: List of active shifts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActiveShiftsResponseDto'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /couriers/{courierId}/shifts:
+    get:
+      summary: Get shift history for a specific courier (staff access)
+      operationId: getCourierShifts
+      tags: [shift-management]
+      description: |
+        Staff can retrieve the shift history for any courier in their tenant.
+        Supports date range filtering and pagination.
+
+        Requires role: **Owner**, **Manager**, or **Order Operator**.
+      parameters:
+        - name: courierId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Paginated shift history for the courier
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedShiftsDto'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+# ---------------------------------------------------------------------------
+# Socket.IO Events (informational — not OpenAPI-native)
+# ---------------------------------------------------------------------------
+# Event: courier:shift_opened
+#   Room:    tenant:{ownerId}:staff
+#   Payload: { courierId, courierName, shiftId, startedAt }
+#   Emitted: when courier successfully opens a shift
+#
+# Event: courier:shift_closed
+#   Room:    tenant:{ownerId}:staff
+#   Payload: { courierId, shiftId, startedAt, endedAt, durationMinutes }
+#   Emitted: when courier successfully closes a shift
