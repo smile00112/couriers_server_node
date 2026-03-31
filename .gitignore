@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+admin/node_modules/
+
+# Build output
+dist/
+admin/dist/
+admin/build/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+admin/.env.local
+admin/.env.*.local
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# TypeScript
+*.tsbuildinfo
+
+# Editor
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# OS
+.DS_Store
+Thumbs.db
