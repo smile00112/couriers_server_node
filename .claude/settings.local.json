@@ -75,7 +75,11 @@
       "Bash(find D:/_WORK_/AI_first/couriers_backend/admin/node_modules/@tanstack/query-core -name *.d.ts)",
       "Bash(find D:/_WORK_/AI_first/couriers_backend/admin/node_modules/@refinedev/core/dist/definitions -name *.d.ts)",
       "Bash(find D:/_WORK_/AI_first/couriers_backend/admin/node_modules/@refinedev/core/dist -name useLogin*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(for spec:*)",
+      "Bash(do echo:*)",
+      "Read(//d/_WORK_/AI_first/couriers_backend/**)",
+      "Bash(done)"
     ]
   }
 }
