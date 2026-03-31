@@ -23,7 +23,7 @@ export class Client {
 
   @Column({ length: 30 }) phone!: string;
 
-  @Column({ length: 255, nullable: true }) name!: string | null;
+  @Column({ length: 255, nullable: true, type: 'varchar' }) name!: string | null;
 
   @CreateDateColumn() created_at!: Date;
 

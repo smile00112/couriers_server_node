@@ -41,9 +41,9 @@ export class Courier {
 
   @Column({ nullable: true, type: 'varchar' }) telegram_chat_id!: string | null;
 
-  @Column({ length: 100, nullable: true }) login!: string | null;
+  @Column({ length: 100, nullable: true, type: 'varchar' }) login!: string | null;
 
-  @Column({ length: 255, nullable: true, select: false }) password_hash!:
+  @Column({ length: 255, nullable: true, select: false, type: 'varchar' }) password_hash!:
     | string
     | null;
 
