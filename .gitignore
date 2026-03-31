@@ -33,3 +33,12 @@ npm-debug.log*
 # OS
 .DS_Store
 Thumbs.db
+build/
+
+coverage/
+.env.*
+!.env.example
+tmp/
+
+
+

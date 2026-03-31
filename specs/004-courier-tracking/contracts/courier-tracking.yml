@@ -1,0 +1,269 @@
+openapi: 3.1.0
+info:
+  title: Courier Tracking API
+  version: 1.0.0
+  description: |
+    Endpoints for submitting courier GPS locations and retrieving delivery route history.
+    All endpoints are under `/api/v1/` and require a Bearer JWT.
+
+    ## Data Flow
+    ```
+    Courier App → POST /couriers/location
+      → CourierPosition UPSERT (current position)
+      → CourierLocationHistory INSERT (history entry)
+      → order_id linked if active order exists
+      → Socket.IO: courier:location_updated → staff room
+      → BullMQ: location-callback (if order has callback_url)
+    ```
+
+servers:
+  - url: /api/v1
+
+tags:
+  - name: courier-tracking
+    description: GPS location submission and route history
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+
+    SubmitLocationDto:
+      type: object
+      required: [lat, lng]
+      properties:
+        lat:
+          type: number
+          format: double
+          minimum: -90
+          maximum: 90
+          example: 55.7558
+          description: Latitude in decimal degrees
+        lng:
+          type: number
+          format: double
+          minimum: -180
+          maximum: 180
+          example: 37.6173
+          description: Longitude in decimal degrees
+
+    LocationResponseDto:
+      type: object
+      description: Confirmation returned after a successful location update
+      required: [courier_id, lat, lng, recorded_at]
+      properties:
+        courier_id:
+          type: string
+          format: uuid
+        lat:
+          type: number
+          format: double
+          example: 55.7558
+        lng:
+          type: number
+          format: double
+          example: 37.6173
+        recorded_at:
+          type: string
+          format: date-time
+        order_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Active order at the time of this update, if any
+        distance_meters:
+          type: number
+          format: double
+          example: 123.45
+          description: Distance in metres from the previous recorded position (0 for first update)
+
+    RoutePointDto:
+      type: object
+      required: [id, lat, lng, distance_meters, recorded_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        lat:
+          type: number
+          format: double
+          example: 55.7558
+        lng:
+          type: number
+          format: double
+          example: 37.6173
+        distance_meters:
+          type: number
+          format: double
+          example: 87.30
+        recorded_at:
+          type: string
+          format: date-time
+
+    RouteHistoryResponseDto:
+      type: object
+      required: [order_id, courier_id, total_distance_meters, points]
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        courier_id:
+          type: string
+          format: uuid
+        total_distance_meters:
+          type: number
+          format: double
+          example: 4521.10
+          description: Sum of all individual segment distances for this delivery
+        points:
+          type: array
+          items:
+            $ref: '#/components/schemas/RoutePointDto'
+
+    ErrorDto:
+      type: object
+      required: [statusCode, message]
+      properties:
+        statusCode:
+          type: integer
+        message:
+          type: string
+        error:
+          type: string
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid JWT
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDto'
+    Forbidden:
+      description: Role not permitted for this action
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDto'
+    NotFound:
+      description: Order not found or not in tenant
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDto'
+    TooManyRequests:
+      description: Rate limit exceeded — courier is submitting locations too frequently
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDto'
+          example:
+            statusCode: 429
+            message: "Too many requests"
+            error: "Too Many Requests"
+    UnprocessableEntity:
+      description: Invalid coordinate values
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDto'
+          example:
+            statusCode: 422
+            message: "lat must not be greater than 90"
+            error: "Unprocessable Entity"
+
+security:
+  - bearerAuth: []
+
+paths:
+
+  /couriers/location:
+    post:
+      summary: Submit current GPS location
+      operationId: submitLocation
+      tags: [courier-tracking]
+      description: |
+        Records the courier's current GPS coordinates.
+        - Updates the courier's current position (UPSERT).
+        - Appends a history entry with Haversine distance from previous position.
+        - Links the entry to the courier's active order, if any.
+        - Emits `courier:location_updated` via Socket.IO to the staff room.
+        - If the courier has an active order with a `callback_url`, enqueues an external location callback.
+
+        Rate-limited to 1 accepted update per 5 seconds per courier.
+
+        Requires role: **Courier**.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitLocationDto'
+      responses:
+        '200':
+          description: Location recorded successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LocationResponseDto'
+        '400':
+          description: Invalid request body (missing required fields)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDto'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /orders/{id}/route:
+    get:
+      summary: Get route history for a completed or in-progress delivery
+      operationId: getOrderRoute
+      tags: [courier-tracking]
+      description: |
+        Returns the full chronological sequence of GPS points recorded while the
+        courier was actively delivering this order. Includes each point's distance
+        from the previous point and the total route distance.
+
+        Requires role: **Owner**, **Manager**, or **Order Operator**.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Order UUID
+      responses:
+        '200':
+          description: Route history for the order
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RouteHistoryResponseDto'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+# ---------------------------------------------------------------------------
+# Socket.IO Events (informational — not OpenAPI-native)
+# ---------------------------------------------------------------------------
+# Event: courier:location_updated
+#   Room:    tenant:{ownerId}:staff
+#   Payload: { courierId, lat, lng, recordedAt, orderId (nullable), distanceMeters }
+#   Emitted: on every accepted location update
+#
+# Note: Couriers do NOT receive location events for other couriers.
+#       The staff room only (operators/managers/owners see the map).

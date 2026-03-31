@@ -1,0 +1,486 @@
+openapi: 3.1.0
+info:
+  title: Order Lifecycle API
+  version: 1.0.0
+  description: |
+    Endpoints for progressing orders through their lifecycle.
+    All endpoints are under `/api/v1/` and require a Bearer JWT.
+
+    ## Status Machine
+    ```
+    created → assigned → picked_up → in_delivery → completed
+                └──────────────── cancelled ───────────────┘
+    ```
+    Couriers drive forward transitions. Operators/Managers/Owners cancel.
+
+servers:
+  - url: /api/v1
+
+tags:
+  - name: orders-lifecycle
+    description: Order status transitions
+
+# ---------------------------------------------------------------------------
+# Reusable schemas
+# ---------------------------------------------------------------------------
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    OrderStatus:
+      type: string
+      enum: [created, assigned, picked_up, in_delivery, completed, cancelled]
+      example: assigned
+
+    CourierSummaryDto:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        first_name:
+          type: string
+          example: Ivan
+        last_name:
+          type: string
+          example: Petrov
+        phone:
+          type: string
+          example: "+79001234567"
+
+    OrderLifecycleResponseDto:
+      type: object
+      description: Order representation returned after every status transition
+      required: [id, owner_id, order_number, status, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        owner_id:
+          type: string
+          format: uuid
+        order_number:
+          type: string
+          example: ORD-2026-00042
+        status:
+          $ref: '#/components/schemas/OrderStatus'
+        courier:
+          nullable: true
+          oneOf:
+            - $ref: '#/components/schemas/CourierSummaryDto'
+            - type: 'null'
+        pickup_address:
+          type: string
+          example: "ул. Ленина, 10, Москва"
+        dropoff_address:
+          type: string
+          example: "пр. Мира, 45, Москва"
+        delivery_fee:
+          type: number
+          format: double
+          example: 350.00
+        callback_url:
+          type: string
+          nullable: true
+          format: uri
+          example: "https://partner.example.com/webhooks/orders/42"
+        assigned_at:
+          type: string
+          format: date-time
+          nullable: true
+        picked_up_at:
+          type: string
+          format: date-time
+          nullable: true
+        in_delivery_at:
+          type: string
+          format: date-time
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        cancelled_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    AvailableOrderDto:
+      type: object
+      description: Minimal order view for the courier's available-orders list
+      required: [id, order_number, pickup_address, dropoff_address, delivery_fee, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        order_number:
+          type: string
+          example: ORD-2026-00042
+        pickup_address:
+          type: string
+          example: "ул. Ленина, 10, Москва"
+        dropoff_address:
+          type: string
+          example: "пр. Мира, 45, Москва"
+        delivery_fee:
+          type: number
+          format: double
+          example: 350.00
+        created_at:
+          type: string
+          format: date-time
+
+    AvailableOrdersListDto:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/AvailableOrderDto'
+        meta:
+          type: object
+          properties:
+            total:
+              type: integer
+              example: 12
+            page:
+              type: integer
+              example: 1
+            limit:
+              type: integer
+              example: 20
+            total_pages:
+              type: integer
+              example: 1
+
+    CancelOrderDto:
+      type: object
+      properties:
+        reason:
+          type: string
+          maxLength: 500
+          example: "Customer cancelled"
+
+    ErrorDto:
+      type: object
+      required: [statusCode, message]
+      properties:
+        statusCode:
+          type: integer
+        message:
+          type: string
+        error:
+          type: string
+
+    ConflictErrorDto:
+      allOf:
+        - $ref: '#/components/schemas/ErrorDto'
+        - type: object
+          properties:
+            existingCourierId:
+              type: string
+              format: uuid
+              description: Set when order is already claimed by another courier
+
+    DeliveryRecordDto:
+      type: object
+      required: [id, order_id, courier_id, delivery_fee, completed_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        order_id:
+          type: string
+          format: uuid
+        courier_id:
+          type: string
+          format: uuid
+        delivery_fee:
+          type: number
+          format: double
+          example: 350.00
+        completed_at:
+          type: string
+          format: date-time
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid JWT
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDto'
+    Forbidden:
+      description: Role not permitted for this action
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDto'
+    NotFound:
+      description: Order not found or not in tenant
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDto'
+    UnprocessableEntity:
+      description: Transition not permitted from current status
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorDto'
+          example:
+            statusCode: 422
+            message: "Cannot transition from 'completed' to 'cancelled'"
+            error: "Unprocessable Entity"
+
+security:
+  - bearerAuth: []
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+paths:
+
+  /orders/available:
+    get:
+      summary: List available (unclaimed) orders for the courier's tenant
+      operationId: getAvailableOrders
+      tags: [orders-lifecycle]
+      description: |
+        Returns orders with `status = 'created'` scoped to the authenticated courier's tenant.
+        Ordered by `created_at ASC` (oldest first — fair queue).
+        Requires role: **Courier**.
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+      responses:
+        '200':
+          description: List of available orders
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AvailableOrdersListDto'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /orders/{id}/claim:
+    post:
+      summary: Claim an available order (created → assigned)
+      operationId: claimOrder
+      tags: [orders-lifecycle]
+      description: |
+        Atomically assigns the order to the authenticated courier.
+        Fails with 409 if already claimed by another courier.
+        Fails with 409 if courier already has an active order (FR-016).
+        Requires role: **Courier**.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Order claimed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderLifecycleResponseDto'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Order already claimed or courier has active order
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConflictErrorDto'
+              examples:
+                alreadyClaimed:
+                  summary: Already claimed by another courier
+                  value:
+                    statusCode: 409
+                    message: "Order is no longer available"
+                    existingCourierId: "b1c2d3e4-..."
+                activeOrder:
+                  summary: Courier already has active order
+                  value:
+                    statusCode: 409
+                    message: "Courier already has an active order"
+
+  /orders/{id}/pickup:
+    post:
+      summary: Mark order as picked up (assigned → picked_up)
+      operationId: pickupOrder
+      tags: [orders-lifecycle]
+      description: |
+        Confirms the courier collected the package from the sender.
+        Requires role: **Courier**. Courier must be the assigned courier for this order.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Status updated to picked_up
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderLifecycleResponseDto'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /orders/{id}/start-delivery:
+    post:
+      summary: Mark order as in delivery (picked_up → in_delivery)
+      operationId: startDelivery
+      tags: [orders-lifecycle]
+      description: |
+        Courier is now heading to the recipient.
+        Requires role: **Courier**. Courier must be the assigned courier.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Status updated to in_delivery
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderLifecycleResponseDto'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /orders/{id}/complete:
+    post:
+      summary: Complete the order (in_delivery → completed)
+      operationId: completeOrder
+      tags: [orders-lifecycle]
+      description: |
+        Marks the order as delivered. Creates a DeliveryRecord and a CourierEarning entry
+        in the same transaction. Emits `order:status_changed` to staff room.
+        Requires role: **Courier**. Courier must be the assigned courier.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Order completed; DeliveryRecord and EarningsEntry created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderLifecycleResponseDto'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /orders/{id}/cancel:
+    post:
+      summary: Cancel an order (any non-terminal → cancelled)
+      operationId: cancelOrder
+      tags: [orders-lifecycle]
+      description: |
+        Cancels an order at any non-terminal status. Clears `courier_id` if set.
+        Enqueues an FCM notification to the assigned courier (if any).
+        Enqueues a callback notification if `callback_url` is set.
+        Requires role: **Owner**, **Manager**, or **Order Operator**.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelOrderDto'
+      responses:
+        '200':
+          description: Order cancelled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderLifecycleResponseDto'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+          description: Order is already in a terminal state (completed or cancelled)
+
+# ---------------------------------------------------------------------------
+# Socket.IO Events (informational — not OpenAPI-native)
+# ---------------------------------------------------------------------------
+# Event: order:status_changed
+#   Room:    tenant:{ownerId}:staff
+#   Payload: { id, order_number, status, previous_status, courier_id, updated_at }
+#   Emitted: on every status transition
+#
+# Event: order:cancelled
+#   Room:    tenant:{ownerId}:couriers
+#   Payload: { id, order_number, status: 'cancelled', previous_status, updated_at }
+#   Emitted: when an order with courier_id is cancelled (to notify the assigned courier)
+#
+# Event: order:status_changed
+#   Room:    tenant:{ownerId}:couriers
+#   Payload: same as staff room
+#   Emitted: on claim (so others see the order disappear from available list)
