@@ -1,6 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class CreateCourierLocationHistory1700000017 implements MigrationInterface {
+export class CreateCourierLocationHistory1700000017000 implements MigrationInterface {
   async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
       CREATE TABLE courier_location_history (

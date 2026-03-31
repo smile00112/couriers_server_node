@@ -1,6 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class CreateOrderAuditEntries1700000012 implements MigrationInterface {
+export class CreateOrderAuditEntries1700000012000 implements MigrationInterface {
   async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
       CREATE TABLE order_audit_entries (

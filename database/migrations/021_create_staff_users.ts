@@ -1,6 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class CreateStaffUsers1700000021 implements MigrationInterface {
+export class CreateStaffUsers1700000021000 implements MigrationInterface {
   async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
       CREATE TYPE staff_user_role AS ENUM ('owner', 'manager', 'order_operator')

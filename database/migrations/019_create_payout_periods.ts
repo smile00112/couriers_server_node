@@ -1,6 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class CreatePayoutPeriods1700000019 implements MigrationInterface {
+export class CreatePayoutPeriods1700000019000 implements MigrationInterface {
   async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
       CREATE TABLE payout_periods (

@@ -1,6 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class CreateCourierRefreshTokens1700000004 implements MigrationInterface {
+export class CreateCourierRefreshTokens1700000004000 implements MigrationInterface {
   async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
       CREATE TABLE courier_refresh_tokens (
