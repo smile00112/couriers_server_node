@@ -17,10 +17,11 @@ import { CancelNotifyProcessor } from './jobs/cancel-notify.processor';
 import { OrderCallbackProcessor } from './jobs/order-callback.processor';
 import { OrdersGateway } from '../gateways/orders.gateway';
 import { AuthModule } from '../auth/auth.module';
-
-export const NEW_ORDER_NOTIFY_QUEUE = 'new-order-notify';
-export const CANCEL_NOTIFY_QUEUE = 'courier-cancel-notify';
-export const ORDER_CALLBACK_QUEUE = 'order-callback';
+import {
+  NEW_ORDER_NOTIFY_QUEUE,
+  CANCEL_NOTIFY_QUEUE,
+  ORDER_CALLBACK_QUEUE,
+} from '../queues/queues.constants';
 
 @Module({
   imports: [

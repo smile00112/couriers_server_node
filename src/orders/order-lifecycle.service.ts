@@ -22,7 +22,7 @@ import {
   AvailableOrderDto,
   AvailableOrdersListDto,
 } from './dto/available-orders-response.dto';
-import { CANCEL_NOTIFY_QUEUE, ORDER_CALLBACK_QUEUE } from './orders.module';
+import { CANCEL_NOTIFY_QUEUE, ORDER_CALLBACK_QUEUE } from '../queues/queues.constants';
 import { CourierShift } from '../couriers/entities/courier-shift.entity';
 
 const COURIER_TRANSITIONS: Record<string, string> = {

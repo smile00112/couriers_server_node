@@ -13,8 +13,7 @@ import { ShiftManagementController } from './shift-management.controller';
 import { CouriersAdminService } from './couriers-admin.service';
 import { CouriersAdminController } from './couriers-admin.controller';
 import { OrdersModule } from '../orders/orders.module';
-
-export const LOCATION_CALLBACK_QUEUE = 'location-callback';
+import { LOCATION_CALLBACK_QUEUE } from '../queues/queues.constants';
 
 @Module({
   imports: [

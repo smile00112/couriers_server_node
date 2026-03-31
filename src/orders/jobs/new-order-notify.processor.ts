@@ -4,7 +4,7 @@ import { Job } from 'bullmq';
 import { DataSource } from 'typeorm';
 import { FirebaseService } from '../../firebase/firebase.service';
 import { Courier } from '../../couriers/entities/courier.entity';
-import { NEW_ORDER_NOTIFY_QUEUE } from '../orders.module';
+import { NEW_ORDER_NOTIFY_QUEUE } from '../../queues/queues.constants';
 
 interface NotifyJobData {
   orderId: string;

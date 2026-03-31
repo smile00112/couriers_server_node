@@ -4,7 +4,7 @@ import { Job } from 'bullmq';
 import { DataSource } from 'typeorm';
 import { FirebaseService } from '../../firebase/firebase.service';
 import { Courier } from '../../couriers/entities/courier.entity';
-import { CANCEL_NOTIFY_QUEUE } from '../orders.module';
+import { CANCEL_NOTIFY_QUEUE } from '../../queues/queues.constants';
 
 interface CancelNotifyJobData {
   courierId: string;

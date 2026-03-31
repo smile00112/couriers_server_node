@@ -26,7 +26,7 @@ import {
   OrderListResponseDto,
   OrderResponseDto,
 } from './dto/order-response.dto';
-import { NEW_ORDER_NOTIFY_QUEUE } from './orders.module';
+import { NEW_ORDER_NOTIFY_QUEUE } from '../queues/queues.constants';
 
 @Injectable()
 export class OrdersService {

@@ -1,7 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
-import { LOCATION_CALLBACK_QUEUE } from '../couriers.module';
+import { LOCATION_CALLBACK_QUEUE } from '../../queues/queues.constants';
 
 interface LocationCallbackJobData {
   courierId: string;

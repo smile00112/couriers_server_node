@@ -1,7 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
-import { ORDER_CALLBACK_QUEUE } from '../orders.module';
+import { ORDER_CALLBACK_QUEUE } from '../../queues/queues.constants';
 
 interface CallbackJobData {
   orderId: string;

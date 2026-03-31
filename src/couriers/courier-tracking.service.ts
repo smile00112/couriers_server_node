@@ -14,7 +14,7 @@ import {
 } from './dto/location-history-response.dto';
 import type { PaginatedRouteHistoryDto, RouteHistoryListItemDto } from './dto/route-history-list.dto';
 import { AuthUser } from '../auth/interfaces/jwt-payload.interface';
-import { LOCATION_CALLBACK_QUEUE } from './couriers.module';
+import { LOCATION_CALLBACK_QUEUE } from '../queues/queues.constants';
 
 @Injectable()
 export class CourierTrackingService {
