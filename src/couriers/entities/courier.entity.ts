@@ -39,7 +39,7 @@ export class Courier {
 
   @Column({ nullable: true }) fcm_token!: string;
 
-  @Column({ nullable: true }) telegram_chat_id!: string | null;
+  @Column({ nullable: true, type: 'varchar' }) telegram_chat_id!: string | null;
 
   @Column({ length: 100, nullable: true }) login!: string | null;
 
