@@ -1,12 +1,10 @@
 # Stage 1: Build Vite app
 FROM node:20-alpine AS builder
 
-RUN npm install -g pnpm
-
 WORKDIR /app
 
-COPY package.json pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile
+COPY package.json package-lock.json ./
+RUN npm ci
 
 COPY . .
 
@@ -14,7 +12,7 @@ COPY . .
 ARG VITE_API_URL=https://new-cur.foodloveapp.ru/v1
 ENV VITE_API_URL=$VITE_API_URL
 
-RUN pnpm build
+RUN npm run build
 
 # Stage 2: Serve static files via nginx
 FROM nginx:alpine
